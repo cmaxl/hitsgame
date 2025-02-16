@@ -56,6 +56,10 @@ The `mkhitsgame.toml` file follows the following format:
 # The url prefix that your webserver will serve the track mp4s from.
 url_prefix = "https://example.com/"
 
+csv_file = "songseeker-csv/hitster-de.csv"
+
+spotify_playlist = ""
+
 # Font to use on the cards.
 font = "Cantarell"
 

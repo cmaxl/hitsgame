@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import csv
 import html
 import os
 import os.path
@@ -76,6 +77,19 @@ class Track(NamedTuple):
         year = int(date[0:4])
 
         return Track(year, fname, title, artist, md5sum, url)
+    
+    def load_from_csv_row(config: Config, row: List[str]) -> Track:
+        """
+        Create a track from a row in a csv file.
+        Card#,Artist,Title,URL,Hashed Info,Youtube-Title,Year
+        """
+        title = row[2]
+        artist = row[1]
+        year = int(row[6])
+        url = config.url_prefix + "{:05d}".format(int(row[0]))
+        md5sum = row[4]
+        fname = ""
+        return Track(year, fname, title, artist, md5sum, url)
 
     def out_fname(self) -> str:
         return self.md5sum + ".mp4"
@@ -126,6 +140,8 @@ class Track(NamedTuple):
 
 class Config(NamedTuple):
     url_prefix: str
+    csv_file: str
+    spotify_playlist: str
     font: str
 
     # Whether to include a grid in the output. This is good for inspecting the
@@ -142,6 +158,14 @@ class Config(NamedTuple):
     def load(fname: str) -> Config:
         with open(fname, "rb") as f:
             toml = tomllib.load(f)
+            # if the provided csv filename consists the keyword "hitster", then
+            # we need to modify the url_prefix to match the filename
+            if "csv_file" in toml:
+                if "hitster" in toml["csv_file"]:
+                    csv_path = os.path.basename(toml["csv_file"])
+                    url_path = csv_path.removeprefix("hitster-").removesuffix(".csv")
+                    url_path = url_path.replace("-", "/")
+                    toml["url_prefix"] = "https://hitstergame.com/" + url_path + "/"
             return Config(**toml)
 
 
@@ -344,13 +368,25 @@ def main() -> None:
     year_counts: Counter[int] = Counter()
     decade_counts: Counter[int] = Counter()
 
-    for fname in os.listdir(track_dir):
-        if not fname.endswith(".flac"):
-            continue
-        fname_full = os.path.join(track_dir, fname)
-        track = Track.load(config, fname_full)
-        track.encode_to_out()
-        tracks.append(track)
+    # Load the tracks from a csv file
+    if(config.csv_file != ""):
+        with open(config.csv_file, newline='') as csvfile:
+            reader = csv.reader(csvfile)
+            header = next(reader)  # read the header row
+            for row in reader:
+                track = Track.load_from_csv_row(config, row)
+                tracks.append(track)
+    elif(config.spotify_playlist != ""):
+        # Load the tracks from a spotify playlist
+        pass
+    else:
+        for fname in os.listdir(track_dir):
+            if not fname.endswith(".flac"):
+                continue
+            fname_full = os.path.join(track_dir, fname)
+            track = Track.load(config, fname_full)
+            track.encode_to_out()
+            tracks.append(track)
 
     tracks.sort()
     for track in tracks:
@@ -383,7 +419,7 @@ def main() -> None:
 
     # For every table, write the two pages as svg.
     pdf_inputs: List[str] = []
-    for i, table in enumerate(tables):
+    for i, table in enumerate(tables[:2]):
         p = i + 1
         pdf_inputs.append(f"build/{p}a.svg")
         pdf_inputs.append(f"build/{p}b.svg")
