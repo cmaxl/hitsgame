@@ -25,6 +25,8 @@ from collections import Counter
 
 from qrcode.image.svg import SvgPathImage  # type: ignore
 
+import cairosvg
+from pypdf import PdfWriter
 
 def metaflac_get_tags(fname: str) -> Tuple[str, Dict[str, str]]:
     """
@@ -78,16 +80,23 @@ class Track(NamedTuple):
 
         return Track(year, fname, title, artist, md5sum, url)
     
-    def load_from_csv_row(config: Config, row: List[str]) -> Track:
+    def load_from_csv_row(config: Config, row: List[str], header: List[str]) -> Track:
         """
         Create a track from a row in a csv file.
         Card#,Artist,Title,URL,Hashed Info,Youtube-Title,Year
         """
-        title = row[2]
-        artist = row[1]
-        year = int(row[6])
-        url = config.url_prefix + "{:05d}".format(int(row[0]))
-        md5sum = row[4]
+        title_idx = header.index("Title")
+        artist_idx = header.index("Artist")
+        year_idx = header.index("Year")
+        card_idx = header.index("Card#")
+        md5sum_idx = header.index("Hashed Info")
+        url_idx = header.index("URL")
+
+        title = row[title_idx]
+        artist = row[artist_idx]
+        year = int(row[year_idx])
+        url = config.url_prefix + "{:05d}".format(int(row[card_idx]))
+        md5sum = row[md5sum_idx]
         fname = ""
         return Track(year, fname, title, artist, md5sum, url)
 
@@ -370,11 +379,11 @@ def main() -> None:
 
     # Load the tracks from a csv file
     if(config.csv_file != ""):
-        with open(config.csv_file, newline='') as csvfile:
+        with open(config.csv_file, newline='', encoding='utf-8') as csvfile:
             reader = csv.reader(csvfile)
             header = next(reader)  # read the header row
             for row in reader:
-                track = Track.load_from_csv_row(config, row)
+                track = Track.load_from_csv_row(config, row, header)
                 tracks.append(track)
     elif(config.spotify_playlist != ""):
         # Load the tracks from a spotify playlist
@@ -419,7 +428,7 @@ def main() -> None:
 
     # For every table, write the two pages as svg.
     pdf_inputs: List[str] = []
-    for i, table in enumerate(tables[:2]):
+    for i, table in enumerate(tables):
         p = i + 1
         pdf_inputs.append(f"build/{p}a.svg")
         pdf_inputs.append(f"build/{p}b.svg")
@@ -428,9 +437,33 @@ def main() -> None:
         with open(pdf_inputs[-1], "w", encoding="utf-8") as f:
             f.write(table.render_svg(config, "qr", f"{p}b"))
 
+    # read the set-name from set-names.csv (located in the same directory as csv_file)
+    set_name = "cards"
+    if(config.csv_file != ""):
+        csv_dir = os.path.dirname(config.csv_file)
+        set_name_file = os.path.join(csv_dir, "set-names.csv")
+        with open(set_name_file, newline='') as csvfile:
+            reader = csv.reader(csvfile)
+            header = next(reader)  # read the header row
+            for row in reader:
+                if row[0] == os.path.basename(config.csv_file).removesuffix(".csv"):
+                    set_name = row[1]
+                    break
+
     # Combine the svgs into a single pdf for easy printing.
-    cmd = ["rsvg-convert", "--format=pdf", "--output=build/cards.pdf", *pdf_inputs]
-    subprocess.check_call(cmd)
+    # on windows use inkscape instead of rsvg-convert
+    if os.name == "nt":
+        
+        merger = PdfWriter()
+        for pdf_input in pdf_inputs:
+            cairosvg.svg2pdf(url=pdf_input, write_to=pdf_input.replace(".svg", ".pdf"))
+            merger.append(pdf_input.replace(".svg", ".pdf"))
+        merger.write("build/" + set_name + ".pdf")
+        merger.close()
+            
+    else:
+        cmd = ["rsvg-convert", "--format=pdf", "--output=build/" + set_name + ".pdf", *pdf_inputs]
+        subprocess.check_call(cmd)
 
 
 if __name__ == "__main__":
